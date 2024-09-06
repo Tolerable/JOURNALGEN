@@ -1,0 +1,27 @@
+# Ignore specific Python files
+JOURNALGEN-*.py
+
+# Ignore JSON files
+*.json
+
+# Ignore image files
+*.jpg
+*.png
+*.gif
+*.svg
+
+# Ignore folders
+journal_entries/
+journal_images/
+
+# Ignore Python cache files
+__pycache__/
+*.py[cod]
+
+# Ignore system files
+.DS_Store
+Thumbs.db
+
+# Ignore virtual environment
+venv/
+env/
