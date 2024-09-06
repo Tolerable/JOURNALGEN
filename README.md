@@ -1,6 +1,6 @@
 # JOURNALGEN
 ## Description
-JOURNALGEN is an AI-enhanced journaling application that combines a calendar interface with daily journal entries and automatically generated images based on the entry content.
+JOURNALGEN is an AI-enhanced journaling application that combines a calendar interface with daily journal entries and automatically generated images from Pollinations.ai based on the entry content.
 ## Features
 - Calendar interface for easy date navigation
 - Daily journal entries with timestamps
