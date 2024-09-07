@@ -374,7 +374,8 @@ class JournalApp:
                     self.entries[self.current_day][i] = (e_id, full_entry, image_path)
                     break
             self.save_to_file()
-            self.load_entries_for_selected_day()
+            day = int(self.current_day.split()[1])  # Extract the day number from self.current_day
+            self.load_entries_for_selected_day(day)
             edit_popup.destroy()
             self.retry_image(entry_id, new_text)
 
@@ -384,7 +385,7 @@ class JournalApp:
 
         # Bind Ctrl+S to save changes
         edit_popup.bind("<Control-s>", lambda event: save_changes())
-    
+
     def delete_entry(self, entry_id):
         # Find and remove the entry from self.entries
         for i, (e_id, _, image_path) in enumerate(self.entries[self.current_day]):
