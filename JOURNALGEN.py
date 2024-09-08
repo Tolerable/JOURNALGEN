@@ -1,14 +1,15 @@
 import customtkinter as ctk
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import messagebox, simpledialog
+import time
 import requests
+from requests.exceptions import RequestException
 from PIL import Image, ImageTk
 from io import BytesIO
 from datetime import datetime
 import os
 import json
 import threading
-import time
 import random
 import calendar
 
@@ -39,33 +40,49 @@ def get_placeholder_image():
         placeholder_image.save(PLACEHOLDER_IMAGE_PATH)
     return PLACEHOLDER_IMAGE_PATH
 
-# Function to get image from Pollinations.ai with specified dimensions (16:9 aspect ratio) and optional seed
-def generate_image_async(entry_id, journal_content, callback):
-    def fetch_image():
+class ImageStyleManager:
+    def __init__(self):
+        self.styles = {
+            "photographic": {"prepend": "", "append": ", photorealistic style"},
+            "anime": {"prepend": "", "append": ", Illustrated_Anime_Style"},
+            "watercolor": {"prepend": "", "append": ", watercolor painting style"},
+            "sketch": {"prepend": "", "append": ", pencil sketch style"}
+        }
+        self.current_style = "photographic"
+        self.user_appearance = ""
+        self.load_settings()
+
+    def set_style(self, style_name):
+        if style_name in self.styles:
+            self.current_style = style_name
+            self.save_settings()
+
+    def set_user_appearance(self, appearance):
+        self.user_appearance = appearance
+        self.save_settings()
+
+    def get_style_string(self, content):
+        style = self.styles[self.current_style]
+        return f"{self.user_appearance} {style['prepend']} {content} {style['append']}".strip()
+
+    def save_settings(self):
+        settings = {
+            "current_style": self.current_style,
+            "user_appearance": self.user_appearance
+        }
+        with open("style_settings.json", "w") as f:
+            json.dump(settings, f)
+
+    def load_settings(self):
         try:
-            print(f"Generating image for entry: {journal_content}")  # Only show journal content
-            seed = random.randint(0, 999999)  # Generate random seed
-            response = requests.get(f'https://pollinations.ai/p/{journal_content}?nologo=true&nofeed=true&width=1920&height=1080&enhance=true&seed={seed}')
-            if response.status_code == 200:
-                image = Image.open(BytesIO(response.content))
-                image_path = os.path.join(IMAGE_DIR, f'{entry_id}.jpg')
-                image.save(image_path)
-                callback(entry_id, image_path)
-                print(f"Image successfully generated for entry {entry_id} with seed {seed}")
-            else:
-                print(f"Failed to generate image for entry {entry_id}. Added to retry queue.")
-                RETRY_QUEUE.append((entry_id, journal_content))
-        except Exception as e:
-            print(f"Error generating image for entry {entry_id}: {e}. Added to retry queue.")
-            RETRY_QUEUE.append((entry_id, journal_content))
-    threading.Thread(target=fetch_image).start()
-
-# Function to process retry queue (attempts to generate images for previously failed entries)
-def process_retry_queue(callback):
-    while RETRY_QUEUE:
-        entry_id, entry_text = RETRY_QUEUE.pop(0)
-        generate_image_async(entry_id, entry_text, callback)
-
+            with open("style_settings.json", "r") as f:
+                settings = json.load(f)
+                self.current_style = settings.get("current_style", "photographic")
+                self.user_appearance = settings.get("user_appearance", "")
+        except FileNotFoundError:
+            # If the file doesn't exist, we'll use the default values
+            pass
+            
 class JournalApp:
     def __init__(self, root):
         self.root = root
@@ -74,13 +91,17 @@ class JournalApp:
         # Set window size
         self.root.geometry("900x650")  # Adjust the size as needed
 
+        # Initialize style manager
+        self.style_manager = ImageStyleManager()
+    
+        # Create menu bar
+        self.menu_bar = tk.Menu(self.root)
+        self.root.config(menu=self.menu_bar)
+        self.create_style_menu()
+
         # Load settings
         self.settings = self.load_settings()
         self.root.attributes('-topmost', self.settings.get("always_on_top", False))
-
-        # Ensure IMAGE_DIR exists
-        if not os.path.exists(IMAGE_DIR):
-            os.makedirs(IMAGE_DIR)
 
         # Initialize retry mechanism
         self.retry_queue = []
@@ -94,6 +115,7 @@ class JournalApp:
         # Main layout
         self.main_frame = ctk.CTkFrame(root)
         self.main_frame.pack(fill=tk.BOTH, expand=True)
+        # self.create_style_menu()
 
         # Left-side frame for calendar navigation
         self.left_frame = ctk.CTkFrame(self.main_frame, width=140, fg_color="lightgrey")
@@ -178,6 +200,95 @@ class JournalApp:
         # Periodically check for entries without images
         self.root.after(60000, self.check_entries_without_images)  # Check every minute
 
+    def create_style_menu(self):
+        self.style_menu = tk.Menu(self.menu_bar, tearoff=0)
+        self.menu_bar.add_cascade(label="Image Style", menu=self.style_menu)
+        
+        self.style_vars = {}
+        for style in self.style_manager.styles:
+            var = tk.StringVar(value=style)
+            self.style_vars[style] = var
+            self.style_menu.add_radiobutton(
+                label=style.capitalize(), 
+                command=lambda s=style: self.set_style(s),
+                variable=var,
+                value=style
+            )
+        
+        self.style_menu.add_separator()
+        self.style_menu.add_command(label="Set User Appearance", command=self.set_user_appearance)
+        self.style_menu.add_separator()
+        self.style_menu.add_command(label="Apply Style to All Entries", command=lambda: self.apply_style_retroactively('all'))
+        self.style_menu.add_command(label="Apply Style to This Month", command=lambda: self.apply_style_retroactively('month'))
+        self.style_menu.add_command(label="Apply Style to Today", command=lambda: self.apply_style_retroactively('day'))
+
+        self.update_style_menu()
+
+    def update_style_menu(self):
+        for style, var in self.style_vars.items():
+            var.set(style if style == self.style_manager.current_style else '')
+
+    def set_style(self, style):
+        self.style_manager.set_style(style)
+        print(f"Image style set to: {style}")
+        self.update_style_menu()
+
+    def set_user_appearance(self):
+        appearance_window = tk.Toplevel(self.root)
+        appearance_window.title("Set User Appearance")
+        appearance_window.geometry("400x300")
+        appearance_window.minsize(300, 200)
+
+        # Create a main frame to hold everything
+        main_frame = tk.Frame(appearance_window)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # Create a frame for the text widget and scrollbar
+        text_frame = tk.Frame(main_frame)
+        text_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Create and pack a Text widget for multi-line input
+        text_widget = tk.Text(text_frame, wrap=tk.WORD, height=10)
+        text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        # Add a scrollbar
+        scrollbar = tk.Scrollbar(text_frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Connect the scrollbar to the text widget
+        text_widget.config(yscrollcommand=scrollbar.set)
+        scrollbar.config(command=text_widget.yview)
+
+        # Insert the current user appearance
+        text_widget.insert(tk.END, self.style_manager.user_appearance)
+
+        def save_appearance():
+            new_appearance = text_widget.get("1.0", tk.END).strip()
+            self.style_manager.set_user_appearance(new_appearance)
+            appearance_window.destroy()
+
+        # Create and pack a Save button
+        save_button = tk.Button(main_frame, text="Save", command=save_appearance)
+        save_button.pack(pady=(5, 0))
+
+        # Bind the window close event to save the appearance
+        appearance_window.protocol("WM_DELETE_WINDOW", save_appearance)
+    
+    def apply_style_retroactively(self, scope='all'):
+        if scope == 'all':
+            entries_to_update = [(day, entry) for day, day_entries in self.entries.items() for entry in day_entries]
+        elif scope == 'month':
+            current_month = datetime.now().strftime("%Y-%m")
+            entries_to_update = [(day, entry) for day, day_entries in self.entries.items() if day.startswith(current_month) for entry in day_entries]
+        elif scope == 'day':
+            entries_to_update = [(self.current_day, entry) for entry in self.entries.get(self.current_day, [])]
+        
+        for day, (entry_id, entry_text, _) in entries_to_update:
+            content = entry_text.split('] ', 1)[1] if '] ' in entry_text else entry_text
+            self.retry_image(entry_id, content)
+        
+        print(f"Applied new style to {len(entries_to_update)} entries.")
+
     def process_retry_queue(self):
         while True:
             with self.retry_lock:
@@ -232,22 +343,43 @@ class JournalApp:
     def generate_image_async(self, entry_id, journal_content, callback):
         def fetch_image():
             image_path = os.path.join(IMAGE_DIR, f'{entry_id}.jpg')
-            try:
-                print(f"Generating image for entry: {entry_id}")
-                seed = random.randint(0, 999999)
-                response = requests.get(f'https://pollinations.ai/p/{journal_content}?nologo=true&nofeed=true&width=1920&height=1080&enhance=true&seed={seed}', timeout=30)
-                if response.status_code == 200:
-                    image = Image.open(BytesIO(response.content))
-                    image.save(image_path)
-                    print(f"Image saved to: {image_path}")
-                    callback(entry_id, image_path)
-                    print(f"Image successfully generated for entry {entry_id} with seed {seed}")
-                else:
-                    print(f"Failed to generate image for entry {entry_id}. Status code: {response.status_code}")
-                    self.add_to_retry_queue(entry_id, journal_content)
-            except Exception as e:
-                print(f"Error generating image for entry {entry_id}: {e}")
-                self.add_to_retry_queue(entry_id, journal_content)
+            max_retries = 3
+            base_wait_time = 5  # seconds
+
+            for attempt in range(max_retries):
+                try:
+                    print(f"Generating image for entry: {entry_id} (Attempt {attempt + 1}/{max_retries})")
+                    seed = random.randint(0, 999999)
+                    styled_content = self.style_manager.get_style_string(journal_content)
+                    response = requests.get(
+                        f'https://image.pollinations.ai/prompt/{styled_content}?nologo=true&seed={seed}&width=1920&height=1080',
+                        timeout=60  # Increased timeout to 60 seconds
+                    )
+                    response.raise_for_status()  # Raises an HTTPError for bad responses
+
+                    if response.content:
+                        image = Image.open(BytesIO(response.content))
+                        image.save(image_path)
+                        print(f"Image saved to: {image_path}")
+                        callback(entry_id, image_path)
+                        print(f"Image successfully generated for entry {entry_id} with seed {seed}")
+                        return
+                    else:
+                        print(f"Received empty response for entry {entry_id}")
+                        raise RequestException("Empty response received")
+
+                except RequestException as e:
+                    print(f"Error generating image for entry {entry_id} (Attempt {attempt + 1}/{max_retries}): {str(e)}")
+                    if attempt < max_retries - 1:
+                        wait_time = base_wait_time * (2 ** attempt)  # Exponential backoff
+                        print(f"Retrying in {wait_time} seconds...")
+                        time.sleep(wait_time)
+                    else:
+                        print(f"Max retries reached for entry {entry_id}. Adding to retry queue.")
+                        self.add_to_retry_queue(entry_id, journal_content)
+
+            print(f"Failed to generate image for entry {entry_id} after {max_retries} attempts.")
+
         threading.Thread(target=fetch_image).start()
 
     # Load settings from file
@@ -620,5 +752,5 @@ if __name__ == "__main__":
     ctk.set_appearance_mode("System")
     root = ctk.CTk()
     app = JournalApp(root)
-    generate_image_async = lambda entry_id, journal_content, callback: app.generate_image_async(entry_id, journal_content, callback)
+    # generate_image_async = lambda entry_id, journal_content, callback: app.generate_image_async(entry_id, journal_content, callback)
     root.mainloop()
