@@ -342,6 +342,35 @@ class JournalApp:
         image_label.bind("<Button-3>", lambda event: self.show_context_menu(event, entry_id, entry_text=entry))
         text_label.bind("<Button-3>", lambda event: self.show_context_menu(event, entry_id, entry_text=entry))
 
+        # New function to handle image popup
+        def show_large_image(event):
+            if image_path and os.path.exists(image_path):
+                popup = tk.Toplevel(self.root)
+                popup.title("Large Image")
+                popup.attributes('-topmost', True)  # Keep the popup on top
+
+                # Calculate 80% of screen size
+                screen_width = popup.winfo_screenwidth()
+                screen_height = popup.winfo_screenheight()
+                popup_width = int(screen_width * 0.8)
+                popup_height = int(screen_height * 0.8)
+
+                popup.geometry(f"{popup_width}x{popup_height}")
+
+                img = Image.open(image_path)
+                img.thumbnail((popup_width, popup_height))  # Resize image to fit the popup
+                photo = ImageTk.PhotoImage(img)
+
+                label = tk.Label(popup, image=photo)
+                label.image = photo  # Keep a reference
+                label.pack(fill=tk.BOTH, expand=True)
+
+                # Close the popup when clicked
+                label.bind("<Button-1>", lambda e: popup.destroy())
+
+        # Bind left-click to show large image
+        image_label.bind("<Button-1>", show_large_image)
+
     # Function to show context menu on right-click
     def show_context_menu(self, event, entry_id, entry_text):
         context_menu = tk.Menu(self.root, tearoff=0)
